@@ -9,7 +9,7 @@
 | Name | SRN |
 |------|-----|
 | Akulkrishna M S | PES1UG24CS554 |
-| Praveen | PES1UG25cs832 |
+| Praveen | PES1UG25CS832 |
 
 ---
 

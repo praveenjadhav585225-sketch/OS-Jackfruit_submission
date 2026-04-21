@@ -61,20 +61,23 @@ cp boilerplate/io_pulse   rootfs-alpha/
 
 > Do **not** commit `rootfs-base/` or `rootfs-*` directories to the repository.
 
-### Load the kernel module
+# Remove old module if already loaded
+sudo rmmod monitor 2>/dev/null || true
 
-```bash
-cd ~/OS-Jackfruit/boilerplate
-
+# Load fresh module
 sudo insmod monitor.ko
 
-# Create the device node (required once per boot)
-sudo mknod /dev/container_monitor c 240 0
+# Create device node with the CORRECT major number (200)
+sudo rm -f /dev/container_monitor
+sudo mknod /dev/container_monitor c 200 0
 sudo chmod 666 /dev/container_monitor
 
-# Verify
+# Verify it exists
 ls -l /dev/container_monitor
-```
+
+# Verify module loaded in kernel
+lsmod | grep monitor
+sudo dmesg | tail -3
 
 ### Start the daemon (Terminal 1)
 
@@ -88,37 +91,107 @@ sudo ./engine daemon
 ```bash
 # Format: sudo ./engine start <name> <rootfs_path> <nice_value> <command> [args...]
 
-# Start two containers running a shell
-sudo ./engine start alpha ../rootfs-alpha 0 /bin/sh -c "sleep 100"
-sudo ./engine start beta  ../rootfs-beta  0 /bin/sh -c "sleep 100"
+# Start them using the raw /bin/sleep command
+sudo ./engine start alpha ../rootfs-alpha 0 /bin/sleep 1000
+sudo ./engine start beta ../rootfs-beta 0 /bin/sleep 1000
+sudo ./engine start gamma ../rootfs-alpha 0 /bin/sleep 10
 
+# Check the status — they will all say RUNNING!
+sudo ./engine ps
 # List all containers with metadata
 sudo ./engine ps
 
 # Start a container that runs /bin/ls — output captured via logging pipeline
 sudo ./engine start log-test ../rootfs-alpha 0 /bin/ls
 
-# Read back its captured output from the log file
-sudo ./engine logs log-test
+# Check log was captured through pipeline
+sudo ./engine logs gamma
 
+# Also show the actual log file on disk
+cat /tmp/jackfruit_gamma.log
+ls -la /tmp/jackfruit_*.log
+
+# Stop alpha - this sends command over Unix socket to daemon
+sudo ./engine stop alpha
+
+# ps again to show state changed
+sudo ./engine ps
+
+# Show the socket file exists (proof of IPC mechanism)
+ls -l /tmp/jackfruit.sock
+Terminal 2 — Open a THIRD terminal for dmesg watching
+
+# In Terminal 3 — watch kernel logs LIVEc
+
+sudo dmesg -w | grep -E "\[Monitor\]"
 # Start a container running memory_hog (triggers soft then hard memory limit)
 # Allocates 8 MB every 500 ms → soft limit (20 MB) hit in ~2.5 s, hard (40 MB) in ~5 s
-sudo ./engine start gamma ../rootfs-gamma 0 /memory_hog 8 500
+sudo ./engine start memtest-real ./rootfs-memtest2 0 /memory_hog 8 500
 
-# Scheduling experiment: cpu_hog at low priority
-sudo ./engine start cpu-low ../rootfs-beta 10 /cpu_hog 30
+# Terminal 2 — High priority container (nice = -10)
+cp -a ./rootfs-base ./rootfs-hi
+sudo cp cpu_hog ./rootfs-hi/
+sudo ./engine start high_prio ./rootfs-hi -10 "/cpu_hog 60"
+
+# Low priority container (nice = +10)
+cp -a ./rootfs-base ./rootfs-lo
+sudo cp cpu_hog ./rootfs-lo/
+sudo ./engine start low_prio ./rootfs-lo 10 "/cpu_hog 60"
 
 # Stop a container
 sudo ./engine stop alpha
 sudo ./engine stop beta
-```
+
+`# Stop previous experiment containers
+sudo ./engine stop high_prio
+sudo ./engine stop low_prio
+
+# CPU-bound container (nice=0)
+cp -a ./rootfs-base ./rootfs-cpu
+sudo cp cpu_hog ./rootfs-cpu/
+sudo ./engine start cpu_test ./rootfs-cpu 0 "/cpu_hog 30"
+
+# I/O-bound container (nice=0)
+cp -a ./rootfs-base ./rootfs-io
+sudo cp io_pulse ./rootfs-io/
+sudo ./engine start io_test ./rootfs-io 0 "/io_pulse 50 100"``
 
 ### Watch kernel memory limit events
 
-```bash
-# In a separate terminal — watch live
-dmesg -w | grep Monitor
-```
+# Stop all remaining containers
+sudo ./engine stop alpha
+sudo ./engine stop beta
+sudo ./engine stop cpu_test
+sudo ./engine stop io_test
+
+# Show ps — all should be STOPPED
+sudo ./engine ps
+
+# Check NO zombie processes exist on the host
+ps aux | grep -E "Z|defunct" | grep -v grep
+
+# Show all log files were created (proof logger threads worked)
+ls -la /tmp/jackfruit_*.log
+
+# Stop the daemon (Ctrl+C in Terminal 1, OR kill it)
+sudo pkill -f "engine daemon"
+
+# Confirm daemon is gone
+ps aux | grep "engine daemon" | grep -v grep
+
+# Unload kernel module cleanly
+sudo rmmod monitor
+
+# Confirm clean kernel module exit
+dmesg | tail -5
+
+# Clean up log files and socket
+sudo rm -f /tmp/jackfruit_*.log
+sudo rm -f /tmp/jackfruit.sock
+
+
+
+
 
 ### Cleanup
 

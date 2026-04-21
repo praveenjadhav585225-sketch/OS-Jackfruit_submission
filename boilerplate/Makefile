@@ -3,7 +3,7 @@ obj-m += monitor.o
 KDIR := /lib/modules/$(shell uname -r)/build
 PWD  := $(shell pwd)
 
-# Workload binaries are built static so they run inside Alpine rootfs.
+# Workload binaries built static so they run inside Alpine rootfs.
 # Override with WORKLOAD_LDFLAGS= (empty) for CI / host-only builds.
 WORKLOAD_LDFLAGS ?= -static
 
@@ -13,7 +13,7 @@ USER_TARGETS := engine memory_hog cpu_hog io_pulse
 all: $(USER_TARGETS) module
 
 # ── CI-safe: user-space only, no kernel module ───────────────
-# Used by GitHub Actions smoke check:  make -C boilerplate ci
+# Used by GitHub Actions:  make -C boilerplate ci
 ci: WORKLOAD_LDFLAGS =
 ci: $(USER_TARGETS)
 

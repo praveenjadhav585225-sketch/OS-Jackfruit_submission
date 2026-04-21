@@ -101,24 +101,34 @@ sudo ./engine ps
 # List all containers with metadata
 sudo ./engine ps
 
-# Start a container that runs /bin/ls — output captured via logging pipeline
 sudo ./engine start log-test ../rootfs-alpha 0 /bin/ls
 
-# Check log was captured through pipeline
-sudo ./engine logs gamma
+# Wait 2 seconds for it to run and finish
+sleep 2
 
-# Also show the actual log file on disk
-cat /tmp/jackfruit_gamma.log
+# Read the captured log via CLI
+sudo ./engine logs log-test
+
+# Also show the raw log file on disk
+cat /tmp/jackfruit_log-test.log
+
+# Show all log files (proof pipeline created them)
 ls -la /tmp/jackfruit_*.log
 
-# Stop alpha - this sends command over Unix socket to daemon
+# Show the Unix socket exists (proof of IPC mechanism)
+ls -l /tmp/jackfruit.sock
+
+# Send a start command — this goes OVER the socket to the daemon
+sudo ./engine start ipc-test ../rootfs-gamma 0 /bin/sh -c "echo hello"
+
+# Daemon receives command via socket, launches container, sends response back
+# Show the response confirms IPC worked
+
+# Stop ipc-test — another CLI command over socket
 sudo ./engine stop alpha
 
-# ps again to show state changed
+# ps shows state updated — daemon processed the stop command
 sudo ./engine ps
-
-# Show the socket file exists (proof of IPC mechanism)
-ls -l /tmp/jackfruit.sock
 Terminal 2 — Open a THIRD terminal for dmesg watching
 
 # In Terminal 3 — watch kernel logs LIVEc
@@ -212,7 +222,7 @@ make clean
 
 ### Screenshot 1 — Multi-container supervision + CLI and IPC
 
-![Multi-container start and CLI IPC](screenshots/s1.png)
+![Multi-container start and CLI IPC](screenshots/1.png)
 
 **Caption:** Two containers — `alpha` and `beta` — started simultaneously via the CLI (`sudo ./engine start alpha ...` and `sudo ./engine start beta ...`). The daemon responds over the UNIX domain socket at `/tmp/jackfruit.sock` with `✅ Started alpha (nice=0 soft=20480KB hard=40960KB)` for each, confirming the two-IPC-mechanism design: pipes carry container stdout, the socket carries CLI control messages.
 
@@ -220,7 +230,7 @@ make clean
 
 ### Screenshot 2 — Metadata tracking (`ps`)
 
-![PS metadata table](screenshots/s2.png)
+![PS metadata table](screenshots/2.png)
 
 **Caption:** `sudo ./engine ps` output showing the container registry table with columns `NAME`, `PID`, `STATE`, `SOFT(KB)`, `HARD(KB)`, and `REASON`. Both `alpha` (PID 3420) and `beta` (PID 3425) show state `STOPPED` with reason `Normal Exit (code 1)` after their `sleep 100` commands completed inside the isolated namespaces.
 
@@ -228,7 +238,8 @@ make clean
 
 ### Screenshot 3 — Bounded-buffer logging
 
-![Logging pipeline output](screenshots/s3.png)
+![Logging pipeline output](screenshots/3.png)
+(screenshots/3-2.png)
 
 **Caption:** `sudo ./engine start log-test ../rootfs-alpha 0 /bin/ls` launches a container that runs `/bin/ls` inside the Alpine rootfs. Its stdout is captured through the pipe → producer thread → bounded buffer → consumer thread → log file pipeline. `sudo ./engine logs log-test` reads back the captured output (`bin`, `dev`, `etc`, `home`, `lib`, `memory_hog`, `proc`, etc.), proving the logging pipeline works end-to-end.
 
@@ -236,7 +247,7 @@ make clean
 
 ### Screenshot 4 — CLI and IPC (second IPC mechanism)
 
-![CLI IPC socket demo](screenshots/s4.png)
+![CLI IPC socket demo](screenshots/4.png)
 
 **Caption:** `sudo ./engine start ipc-test ../rootfs-gamma 0 /bin/sh -c "echo hello"` demonstrates the CLI sending a `start` command over the UNIX domain socket to the running daemon. The daemon responds with `✅ Started ipc-test (nice=0 soft=20480KB hard=40960KB)`, confirming the request-response IPC channel is distinct from the logging pipe.
 
@@ -244,7 +255,8 @@ make clean
 
 ### Screenshot 5 — Soft-limit warning + Hard-limit enforcement
 
-![Memory limits dmesg](screenshots/s5ands6.png)
+![Memory limits dmesg](screenshots/5.png)
+(screenshots/6.png)
 
 **Caption:** `dmesg` output from the kernel monitor's 1-second timer callback. `[Monitor] Registered PID 23628 soft=20480KB hard=40960KB` confirms registration. The **SOFT LIMIT** line shows `PID 23628 RSS=25152KB > soft=20480KB — WARNING` when `memory_hog` exceeded 20 MB — the container continues running. Seconds later, the **HARD LIMIT** line (highlighted red) shows `PID 23628 RSS=41520KB > hard=40960KB — KILLING`, sending `SIGKILL` and terminating the container immediately.
 
@@ -260,7 +272,7 @@ make clean
 
 ### Screenshot 7 — Bounded-buffer logging + Clean teardown
 
-![Logging and teardown](screenshots/s8.png)
+![Logging and teardown](screenshots/8.png)
 
 **Caption:** The full end-to-end demo: `sudo ./engine logs log-ls` confirms log capture through the producer-consumer pipeline (container rootfs directory listing visible). `sudo rmmod monitor` unloads the kernel module cleanly. `ps aux | grep defunct` shows only the pre-existing `sd_espeak-ng-mb` system zombie (unrelated to our runtime) — **no container zombies remain**, confirming correct `SIGCHLD` handling and `waitpid()` reaping throughout the session.
 
